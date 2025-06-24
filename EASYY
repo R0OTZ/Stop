@@ -1,5 +1,5 @@
 -- Military Style Auto Magazine Modifier Script
--- This script automatically modifies magazine values with persistent UI that recreates on death
+-- Performance optimized version to eliminate lag
 
 local Players = game:GetService("Players")
 local StarterGui = game:GetService("StarterGui")
@@ -9,7 +9,7 @@ local player = Players.LocalPlayer
 
 -- Configuration
 local TARGET_MAGAZINE_VALUE = 999999999999999999
-local CHECK_INTERVAL = 2
+local CHECK_INTERVAL = 5 -- Increased from 2 to reduce frequency
 local modifiedGuns = {}
 local totalModified = 0
 local isAutoEnabled = true
@@ -20,6 +20,9 @@ local mainFrame
 local statusLabel
 local toggleButton
 local manualButton
+
+-- Performance: Connection management
+local connections = {}
 
 -- Create the military-style GUI
 local function createGUI()
@@ -161,12 +164,13 @@ local function createGUI()
     closeCorner.CornerRadius = UDim.new(0, 4)
     closeCorner.Parent = closeButton
 
-    -- Make the GUI draggable
+    -- Make the GUI draggable (optimized)
     local dragging = false
     local dragStart = nil
     local startPos = nil
 
-    headerBar.InputBegan:Connect(function(input)
+    -- Store drag connections for cleanup
+    connections[#connections + 1] = headerBar.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
             dragStart = input.Position
@@ -174,14 +178,14 @@ local function createGUI()
         end
     end)
 
-    headerBar.InputChanged:Connect(function(input)
+    connections[#connections + 1] = headerBar.InputChanged:Connect(function(input)
         if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
             local delta = input.Position - dragStart
             mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
 
-    headerBar.InputEnded:Connect(function(input)
+    connections[#connections + 1] = headerBar.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
         end
@@ -191,37 +195,21 @@ local function createGUI()
     connectButtonEvents(toggleButton, manualButton, closeButton)
 end
 
--- Function to modify magazines (optimized version)
+-- Optimized function to modify magazines (reduced memory allocation)
 local function modifyMagazines()
     local backpack = player.Backpack
     if not backpack then return 0 end
     
     local newModifications = 0
+    local backpackChildren = backpack:GetChildren()
     
-    -- Check backpack guns
-    for _, item in pairs(backpack:GetChildren()) do
-        local itemId = item:GetDebugId()
-        
-        if not modifiedGuns[itemId] then
-            local varsFolder = item:FindFirstChild("Vars")
-            if varsFolder then
-                local magazineValue = varsFolder:FindFirstChild("magazine")
-                if magazineValue and (magazineValue:IsA("NumberValue") or magazineValue:IsA("IntValue")) then
-                    magazineValue.Value = TARGET_MAGAZINE_VALUE
-                    modifiedGuns[itemId] = true
-                    newModifications = newModifications + 1
-                    print("Auto-modified magazine for: " .. item.Name)
-                end
-            end
-        end
-    end
-    
-    -- Check equipped gun (in character)
-    if player.Character then
-        for _, item in pairs(player.Character:GetChildren()) do
+    -- Process backpack guns with reduced iterations
+    for i = 1, #backpackChildren do
+        local item = backpackChildren[i]
+        if item:IsA("Tool") then -- Only check tools
             local itemId = item:GetDebugId()
             
-            if not modifiedGuns[itemId] and item:IsA("Tool") then
+            if not modifiedGuns[itemId] then
                 local varsFolder = item:FindFirstChild("Vars")
                 if varsFolder then
                     local magazineValue = varsFolder:FindFirstChild("magazine")
@@ -229,7 +217,32 @@ local function modifyMagazines()
                         magazineValue.Value = TARGET_MAGAZINE_VALUE
                         modifiedGuns[itemId] = true
                         newModifications = newModifications + 1
-                        print("Auto-modified equipped gun: " .. item.Name)
+                        print("Auto-modified magazine for: " .. item.Name)
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Check equipped gun (in character) - optimized
+    local character = player.Character
+    if character then
+        local characterChildren = character:GetChildren()
+        for i = 1, #characterChildren do
+            local item = characterChildren[i]
+            if item:IsA("Tool") then
+                local itemId = item:GetDebugId()
+                
+                if not modifiedGuns[itemId] then
+                    local varsFolder = item:FindFirstChild("Vars")
+                    if varsFolder then
+                        local magazineValue = varsFolder:FindFirstChild("magazine")
+                        if magazineValue and (magazineValue:IsA("NumberValue") or magazineValue:IsA("IntValue")) then
+                            magazineValue.Value = TARGET_MAGAZINE_VALUE
+                            modifiedGuns[itemId] = true
+                            newModifications = newModifications + 1
+                            print("Auto-modified equipped gun: " .. item.Name)
+                        end
                     end
                 end
             end
@@ -239,18 +252,23 @@ local function modifyMagazines()
     return newModifications
 end
 
--- Update status display
+-- Update status display (throttled)
+local lastStatusUpdate = 0
 local function updateStatus(message, color)
-    if statusLabel then
-        statusLabel.Text = message
-        statusLabel.TextColor3 = color or Color3.fromRGB(200, 200, 200)
+    local currentTime = tick()
+    if currentTime - lastStatusUpdate >= 0.5 then -- Throttle UI updates
+        lastStatusUpdate = currentTime
+        if statusLabel then
+            statusLabel.Text = message
+            statusLabel.TextColor3 = color or Color3.fromRGB(200, 200, 200)
+        end
     end
 end
 
 -- Connect button events
 function connectButtonEvents(toggle, manual, close)
     -- Toggle functionality
-    toggle.MouseButton1Click:Connect(function()
+    connections[#connections + 1] = toggle.MouseButton1Click:Connect(function()
         isAutoEnabled = not isAutoEnabled
         
         if isAutoEnabled then
@@ -264,30 +282,37 @@ function connectButtonEvents(toggle, manual, close)
         end
     end)
 
-    -- Manual check button
-    manual.MouseButton1Click:Connect(function()
-        local newMods = modifyMagazines()
-        totalModified = totalModified + newMods
-        
-        if newMods > 0 then
-            updateStatus("MANUAL CHECK: Modified " .. newMods .. " weapon(s)!\nTotal modified: " .. totalModified, Color3.fromRGB(100, 255, 100))
-        else
-            updateStatus("MANUAL CHECK: No new weapons to modify.\nTotal modified: " .. totalModified, Color3.fromRGB(255, 200, 100))
+    -- Manual check button (with cooldown to prevent spam)
+    local lastManualCheck = 0
+    connections[#connections + 1] = manual.MouseButton1Click:Connect(function()
+        local currentTime = tick()
+        if currentTime - lastManualCheck >= 1 then -- 1 second cooldown
+            lastManualCheck = currentTime
+            
+            local newMods = modifyMagazines()
+            totalModified = totalModified + newMods
+            
+            if newMods > 0 then
+                updateStatus("MANUAL CHECK: Modified " .. newMods .. " weapon(s)!\nTotal modified: " .. totalModified, Color3.fromRGB(100, 255, 100))
+            else
+                updateStatus("MANUAL CHECK: No new weapons to modify.\nTotal modified: " .. totalModified, Color3.fromRGB(255, 200, 100))
+            end
         end
     end)
 
     -- Close button
-    close.MouseButton1Click:Connect(function()
+    connections[#connections + 1] = close.MouseButton1Click:Connect(function()
         if screenGui then
             screenGui:Destroy()
         end
+        cleanup()
     end)
 end
 
 -- Auto-check variables
 local lastCheckTime = 0
 
--- Main auto-check function
+-- Main auto-check function (optimized)
 local function autoCheck()
     if not isAutoEnabled then return end
     
@@ -306,10 +331,10 @@ local function autoCheck()
     end
 end
 
--- Event handlers
+-- Event handlers (optimized)
 local function onItemAdded(item)
-    if isAutoEnabled then
-        wait(0.1)
+    if isAutoEnabled and item:IsA("Tool") then -- Only respond to tools
+        task.wait(0.1) -- Use task.wait instead of wait
         local newMods = modifyMagazines()
         if newMods > 0 then
             totalModified = totalModified + newMods
@@ -320,9 +345,9 @@ end
 
 local function onCharacterAdded(character)
     if isAutoEnabled then
-        modifiedGuns = {}
+        modifiedGuns = {} -- Clear cache on respawn
         
-        wait(2)
+        task.wait(2) -- Use task.wait instead of wait
         local newMods = modifyMagazines()
         totalModified = totalModified + newMods
         
@@ -330,10 +355,10 @@ local function onCharacterAdded(character)
         
         -- Connect to new backpack
         local backpack = player:WaitForChild("Backpack")
-        backpack.ChildAdded:Connect(onItemAdded)
+        connections[#connections + 1] = backpack.ChildAdded:Connect(onItemAdded)
         
         -- Connect to character for equipped items
-        character.ChildAdded:Connect(function(child)
+        connections[#connections + 1] = character.ChildAdded:Connect(function(child)
             if child:IsA("Tool") then
                 onItemAdded(child)
             end
@@ -341,8 +366,21 @@ local function onCharacterAdded(character)
     end
 end
 
+-- Cleanup function to prevent memory leaks
+local function cleanup()
+    for i = 1, #connections do
+        if connections[i] then
+            connections[i]:Disconnect()
+        end
+    end
+    connections = {}
+end
+
 -- Initialize the script
 local function initialize()
+    -- Clean up existing connections
+    cleanup()
+    
     -- Create GUI
     createGUI()
     
@@ -350,19 +388,29 @@ local function initialize()
     if player.Character then
         onCharacterAdded(player.Character)
     end
-    player.CharacterAdded:Connect(onCharacterAdded)
+    connections[#connections + 1] = player.CharacterAdded:Connect(onCharacterAdded)
     
     -- Connect backpack events if backpack already exists
     if player.Backpack then
-        player.Backpack.ChildAdded:Connect(onItemAdded)
+        connections[#connections + 1] = player.Backpack.ChildAdded:Connect(onItemAdded)
     end
     
-    -- Main loop
-    RunService.Heartbeat:Connect(autoCheck)
+    -- Main loop - Changed from Heartbeat to Stepped for better performance
+    connections[#connections + 1] = RunService.Stepped:Connect(autoCheck)
     
-    -- Initial check
-    modifyMagazines()
+    -- Initial check with delay to prevent startup lag
+    task.spawn(function()
+        task.wait(1)
+        modifyMagazines()
+    end)
 end
 
 -- Start the script
 initialize()
+
+-- Cleanup on script removal
+script.AncestryChanged:Connect(function()
+    if not script.Parent then
+        cleanup()
+    end
+end)
