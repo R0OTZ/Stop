@@ -1,0 +1,242 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+local ESP = {
+    Enabled = true,
+    ShowTeamColor = true,
+    ShowHealthBar = true,
+    TextSize = 14,
+    BoxThickness = 2,
+    BoxTransparency = 0.5,
+    TextTransparency = 0,
+    HealthBarThickness = 2,
+    HealthBarWidth = 50,
+    HealthBarHeight = 5,
+    MaxDistance = 5000,
+    UpdateRate = 60, -- Target FPS for ESP updates (lower = better performance)
+}
+
+local ESPObjects = {}
+local frameCount = 0
+local updateInterval = math.max(1, math.floor(60 / ESP.UpdateRate))
+
+-- Cache frequently accessed properties
+local CameraCFrame = Camera.CFrame
+local CameraPosition = CameraCFrame.Position
+
+-- Pre-calculate constants
+local HEALTH_MULTIPLIER = 2
+local BOX_WIDTH_RATIO = 0.6
+local VERTICAL_OFFSET = 3
+local TEXT_OFFSET = 20
+local HEALTH_OFFSET = 10
+
+local function CreateESPForPlayer(player)
+    if player == LocalPlayer then return end
+    
+    local espObject = {}
+    
+    espObject.Box = Drawing.new("Square")
+    espObject.Box.Visible = false
+    espObject.Box.Thickness = ESP.BoxThickness
+    espObject.Box.Transparency = ESP.BoxTransparency
+    espObject.Box.Filled = false
+    
+    espObject.Text = Drawing.new("Text")
+    espObject.Text.Visible = false
+    espObject.Text.Size = ESP.TextSize
+    espObject.Text.Center = true
+    espObject.Text.Outline = true
+    espObject.Text.Transparency = ESP.TextTransparency
+    
+    espObject.HealthBG = Drawing.new("Square")
+    espObject.HealthBG.Visible = false
+    espObject.HealthBG.Thickness = ESP.HealthBarThickness
+    espObject.HealthBG.Filled = true
+    espObject.HealthBG.Color = Color3.fromRGB(100, 100, 100)
+    espObject.HealthBG.Transparency = 0.7
+    
+    espObject.HealthBar = Drawing.new("Square")
+    espObject.HealthBar.Visible = false
+    espObject.HealthBar.Thickness = ESP.HealthBarThickness
+    espObject.HealthBar.Filled = true
+    espObject.HealthBar.Transparency = 0.7
+    
+    -- Cache player properties
+    espObject.Player = player
+    espObject.LastUpdate = 0
+    
+    ESPObjects[player] = espObject
+    
+    player.AncestryChanged:Connect(function()
+        if not player:IsDescendantOf(game) then
+            if ESPObjects[player] then
+                for _, object in pairs(ESPObjects[player]) do
+                    if typeof(object) == "userdata" and object.Remove then
+                        object:Remove()
+                    end
+                end
+                ESPObjects[player] = nil
+            end
+        end
+    end)
+end
+
+-- Initialize ESP for existing players
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        CreateESPForPlayer(player)
+    end
+end
+
+Players.PlayerAdded:Connect(CreateESPForPlayer)
+
+Players.PlayerRemoving:Connect(function(player)
+    if ESPObjects[player] then
+        for _, object in pairs(ESPObjects[player]) do
+            if typeof(object) == "userdata" and object.Remove then
+                object:Remove()
+            end
+        end
+        ESPObjects[player] = nil
+    end
+end)
+
+-- Cache color calculations
+local teamColorCache = {}
+local function GetPlayerTeamColor(player)
+    if not teamColorCache[player] then
+        teamColorCache[player] = player.Team and player.TeamColor.Color or Color3.fromRGB(255, 255, 255)
+    end
+    return teamColorCache[player]
+end
+
+-- Optimized health color calculation with caching
+local healthColorCache = {}
+local function GetHealthColor(healthPercent)
+    local key = math.floor(healthPercent * 100)
+    if not healthColorCache[key] then
+        local r = math.clamp(HEALTH_MULTIPLIER * (1 - healthPercent), 0, 1)
+        local g = math.clamp(HEALTH_MULTIPLIER * healthPercent, 0, 1)
+        healthColorCache[key] = Color3.new(r, g, 0)
+    end
+    return healthColorCache[key]
+end
+
+-- Clear team color cache when team changes
+Players.PlayerAdded:Connect(function(player)
+    player:GetPropertyChangedSignal("Team"):Connect(function()
+        teamColorCache[player] = nil
+    end)
+end)
+
+-- Batch visibility updates
+local function SetESPVisibility(espObject, visible)
+    espObject.Box.Visible = visible
+    espObject.Text.Visible = visible
+    espObject.HealthBG.Visible = visible and ESP.ShowHealthBar
+    espObject.HealthBar.Visible = visible and ESP.ShowHealthBar
+end
+
+RunService.RenderStepped:Connect(function()
+    frameCount = frameCount + 1
+    
+    -- Skip frames for performance
+    if frameCount % updateInterval ~= 0 then
+        return
+    end
+    
+    if not ESP.Enabled then
+        for _, espObject in pairs(ESPObjects) do
+            SetESPVisibility(espObject, false)
+        end
+        return
+    end
+    
+    -- Update camera position cache less frequently
+    CameraCFrame = Camera.CFrame
+    CameraPosition = CameraCFrame.Position
+    
+    for player, espObject in pairs(ESPObjects) do
+        local character = player.Character
+        if not character then
+            SetESPVisibility(espObject, false)
+            continue
+        end
+        
+        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        local humanoid = character:FindFirstChild("Humanoid")
+        
+        if not humanoidRootPart or not humanoid then
+            SetESPVisibility(espObject, false)
+            continue
+        end
+        
+        local rootPosition = humanoidRootPart.Position
+        local distance = (rootPosition - CameraPosition).Magnitude
+        
+        if distance > ESP.MaxDistance then
+            SetESPVisibility(espObject, false)
+            continue
+        end
+        
+        local vector, onScreen = Camera:WorldToViewportPoint(rootPosition)
+        
+        if not onScreen then
+            SetESPVisibility(espObject, false)
+            continue
+        end
+        
+        -- Calculate box dimensions
+        local topVector = Camera:WorldToViewportPoint(rootPosition + Vector3.new(0, VERTICAL_OFFSET, 0))
+        local bottomVector = Camera:WorldToViewportPoint(rootPosition - Vector3.new(0, VERTICAL_OFFSET, 0))
+        
+        local height = math.abs(topVector.Y - bottomVector.Y)
+        local width = height * BOX_WIDTH_RATIO
+        local halfWidth = width * 0.5
+        local halfHeight = height * 0.5
+        
+        local boxX = vector.X - halfWidth
+        local boxY = vector.Y - halfHeight
+        
+        -- Update box
+        espObject.Box.Position = Vector2.new(boxX, boxY)
+        espObject.Box.Size = Vector2.new(width, height)
+        espObject.Box.Color = GetPlayerTeamColor(player)
+        
+        -- Update text with cached health calculation
+        local health = humanoid.Health
+        local maxHealth = humanoid.MaxHealth
+        local healthPercent = health / maxHealth
+        
+        espObject.Text.Position = Vector2.new(vector.X, boxY - TEXT_OFFSET)
+        espObject.Text.Text = string.format("%s [%.0f%%]", player.Name, healthPercent * 100)
+        espObject.Text.Color = GetPlayerTeamColor(player)
+        
+        if ESP.ShowHealthBar then
+            local healthBarX = vector.X - ESP.HealthBarWidth * 0.5
+            local healthBarY = boxY - HEALTH_OFFSET
+            
+            -- Update health bar background
+            espObject.HealthBG.Position = Vector2.new(healthBarX, healthBarY)
+            espObject.HealthBG.Size = Vector2.new(ESP.HealthBarWidth, ESP.HealthBarHeight)
+            
+            -- Update health bar
+            espObject.HealthBar.Position = Vector2.new(healthBarX, healthBarY)
+            espObject.HealthBar.Size = Vector2.new(ESP.HealthBarWidth * healthPercent, ESP.HealthBarHeight)
+            espObject.HealthBar.Color = GetHealthColor(healthPercent)
+        end
+        
+        SetESPVisibility(espObject, true)
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.RightAlt then
+        ESP.Enabled = not ESP.Enabled
+        print("ESP " .. (ESP.Enabled and "Enabled" or "Disabled"))
+    end
+end)
