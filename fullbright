@@ -1,0 +1,94 @@
+pcall(function()
+    local lighting = game:GetService("Lighting")
+    local players = game:GetService("Players")
+    local runService = game:GetService("RunService")
+
+    -- Set initial lighting settings
+    local function applyLightingSettings()
+        lighting.Ambient = Color3.fromRGB(255, 255, 255)
+        lighting.Brightness = 1
+        lighting.FogEnd = 1e10
+    end
+
+    -- Disable visual effects once
+    local function disableEffects()
+        for i, v in pairs(lighting:GetDescendants()) do
+            if v:IsA("BloomEffect") or v:IsA("BlurEffect") or v:IsA("ColorCorrectionEffect") or v:IsA("SunRaysEffect") then
+                v.Enabled = false
+            end
+        end
+    end
+
+    -- Apply settings initially
+    applyLightingSettings()
+    disableEffects()
+
+    -- Use more efficient change detection with debounce
+    local lastChange = 0
+    local debounceTime = 0.1 -- Only check every 0.1 seconds
+
+    lighting.Changed:Connect(function()
+        local currentTime = tick()
+        if currentTime - lastChange >= debounceTime then
+            lastChange = currentTime
+            applyLightingSettings()
+        end
+    end)
+
+    -- Character lighting with proper cleanup
+    local localPlayer = players.LocalPlayer
+    local currentConnection
+
+    local function addCharacterLight(character)
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            local rootPart = character.HumanoidRootPart
+
+            -- Remove existing light if present
+            local existingLight = rootPart:FindFirstChildWhichIsA("PointLight")
+            if existingLight then
+                existingLight:Destroy()
+            end
+
+            -- Add new light
+            local headlight = Instance.new("PointLight")
+            headlight.Brightness = 1
+            headlight.Range = 60
+            headlight.Parent = rootPart
+        end
+    end
+
+    -- Handle character spawning more efficiently
+    local function onCharacterAdded(character)
+        -- Clean up previous connection
+        if currentConnection then
+            currentConnection:Disconnect()
+        end
+
+        -- Wait for character to fully load
+        if character:FindFirstChild("HumanoidRootPart") then
+            addCharacterLight(character)
+        else
+            currentConnection = character.ChildAdded:Connect(function(child)
+                if child.Name == "HumanoidRootPart" then
+                    addCharacterLight(character)
+                    currentConnection:Disconnect()
+                end
+            end)
+        end
+    end
+
+    -- Connect to character spawning
+    if localPlayer.Character then
+        onCharacterAdded(localPlayer.Character)
+    end
+
+    localPlayer.CharacterAdded:Connect(onCharacterAdded)
+
+    -- Handle new lighting effects being added
+    lighting.DescendantAdded:Connect(function(descendant)
+        if descendant:IsA("BloomEffect") or descendant:IsA("BlurEffect") or 
+           descendant:IsA("ColorCorrectionEffect") or descendant:IsA("SunRaysEffect") then
+            descendant.Enabled = false
+        end
+    end)
+end)
