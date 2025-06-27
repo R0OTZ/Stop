@@ -1,0 +1,83 @@
+-- Add this code right after the minimizeButton creation (around line 108)
+
+local helpButton = Instance.new("TextButton")
+addSoundEffectsToButton(helpButton, "click")
+helpButton.Name = "HelpButton"
+helpButton.Size = UDim2.new(0, 30, 0, 30)
+helpButton.Position = UDim2.new(1, -105, 0, 2.5) -- Positioned to the left of minimize button
+helpButton.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+helpButton.Text = "?"
+helpButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+helpButton.TextSize = 16
+helpButton.Font = Enum.Font.SourceSansBold
+helpButton.BorderSizePixel = 1
+helpButton.BorderColor3 = Color3.fromRGB(100, 100, 100)
+helpButton.Parent = titleBar
+
+-- Create the tooltip frame (initially hidden)
+local tooltipFrame = Instance.new("Frame")
+tooltipFrame.Name = "TooltipFrame"
+tooltipFrame.Size = UDim2.new(0, 280, 0, 60)
+tooltipFrame.Position = UDim2.new(0, -285, 0, 35) -- Positioned below the help button
+tooltipFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+tooltipFrame.BackgroundTransparency = 1 -- Start hidden
+tooltipFrame.BorderSizePixel = 1
+tooltipFrame.BorderColor3 = Color3.fromRGB(100, 100, 100)
+tooltipFrame.Visible = false
+tooltipFrame.ZIndex = 100 -- Higher ZIndex to ensure it shows above everything
+tooltipFrame.Parent = screenGui -- Parent to screenGui instead of helpButton
+
+-- Create the tooltip text
+local tooltipLabel = Instance.new("TextLabel")
+tooltipLabel.Name = "TooltipLabel"
+tooltipLabel.Size = UDim2.new(1, -10, 1, -10)
+tooltipLabel.Position = UDim2.new(0, 5, 0, 5)
+tooltipLabel.BackgroundTransparency = 1
+tooltipLabel.Text = "Disclaimer: Changing values may not affect everything, remember you're locally changing your game, NOT OTHERS!"
+tooltipLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+tooltipLabel.TextSize = 11
+tooltipLabel.Font = Enum.Font.SourceSans
+tooltipLabel.TextWrapped = true
+tooltipLabel.TextXAlignment = Enum.TextXAlignment.Left
+tooltipLabel.TextYAlignment = Enum.TextYAlignment.Center
+tooltipLabel.ZIndex = 101 -- Higher than tooltip frame
+tooltipLabel.TextTransparency = 1 -- Start hidden
+tooltipLabel.Parent = tooltipFrame
+
+-- Add hover effects for the help button (no shadow/size change)
+helpButton.MouseEnter:Connect(function()
+    tooltipFrame.Visible = true
+    
+    -- Fade in tooltip
+    tooltipFrame.BackgroundTransparency = 1
+    tooltipLabel.TextTransparency = 1
+    local fadeInTween = TweenService:Create(tooltipFrame, quickAnimationInfo, {
+        BackgroundTransparency = 0.15
+    })
+    local textFadeInTween = TweenService:Create(tooltipLabel, quickAnimationInfo, {
+        TextTransparency = 0
+    })
+    fadeInTween:Play()
+    textFadeInTween:Play()
+end)
+
+helpButton.MouseLeave:Connect(function()
+    -- Fade out tooltip
+    local fadeOutTween = TweenService:Create(tooltipFrame, quickAnimationInfo, {
+        BackgroundTransparency = 1
+    })
+    local textFadeOutTween = TweenService:Create(tooltipLabel, quickAnimationInfo, {
+        TextTransparency = 1
+    })
+    fadeOutTween:Play()
+    textFadeOutTween:Play()
+    
+    fadeOutTween.Completed:Connect(function()
+        tooltipFrame.Visible = false
+    end)
+end)
+
+-- Optional: Add click functionality to help button (just for the sound effect)
+helpButton.MouseButton1Click:Connect(function()
+    -- Could add additional help functionality here if needed
+end)
